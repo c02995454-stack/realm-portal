@@ -2,6 +2,7 @@
 <html>
   <head>
     <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>Realms App - Cloud Sync & Filtered Export</title>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
@@ -13,8 +14,8 @@
     <script src="https://cdn.jsdelivr.net/npm/open-location-code@1.0.3/js/openlocationcode.min.js"></script>
 
     <style>
-      body, html { margin: 0; padding: 0; height: 100%; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-      #root { height: 100%; }
+      body, html { margin: 0; padding: 0; min-height: 100%; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+      #root { min-height: 100vh; }
       
       #notification-banner {
         position: fixed; top: -100px; left: 0; right: 0; padding: 15px;
@@ -27,9 +28,11 @@
       .scroll-box::-webkit-scrollbar { width: 6px; }
       .scroll-box::-webkit-scrollbar-track { background: rgba(255,255,255,0.05); }
       .scroll-box::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 10px; }
+      
       .status-dot { height: 8px; width: 8px; border-radius: 50%; display: inline-block; margin-right: 8px; }
       .dot-active { background-color: #4db6ac; box-shadow: 0 0 8px #4db6ac; }
       .dot-inactive { background-color: #ff8a65; }
+      
       .late-tag { 
         font-size: 10px; background: #ff5252; color: white; padding: 2px 6px; 
         border-radius: 4px; margin-left: 8px; cursor: help; font-weight: bold; display: inline-block;
@@ -41,21 +44,22 @@
       .admin-history-row { background: rgba(0,0,0,0.2); font-size: 11px; }
       .clickable-name { cursor: pointer; text-decoration: underline; text-decoration-style: dotted; }
       .clickable-name:hover { color: #4db6ac; }
+      
       .download-btn {
         background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2);
         color: white; padding: 4px 8px; border-radius: 4px; font-size: 10px; cursor: pointer;
       }
       .download-btn:hover { background: rgba(255,255,255,0.2); }
+      
       .filter-input {
         background: rgba(255,255,255,0.9); border: none; border-radius: 6px; padding: 5px;
-        font-size: 11px; color: #333; width: 110px;
+        font-size: 11px; color: #333; width: 100%;
       }
       .reset-btn {
         background: rgba(255,50,50,0.2); border: 1px solid rgba(255,255,255,0.2);
         color: white; padding: 5px 10px; border-radius: 6px; font-size: 11px; cursor: pointer;
         display: flex; align-items: center; justify-content: center;
       }
-      .reset-btn:hover { background: rgba(255,50,50,0.4); }
 
       .stat-grid {
         display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 15px;
@@ -73,6 +77,17 @@
         100% { transform: scale(0.95); opacity: 0.7; }
       }
       .loading-pulse { animation: pulse 1.5s infinite ease-in-out; }
+
+      /* RESPONSIVE ADJUSTMENTS */
+      @media (max-width: 600px) {
+        .stat-grid { grid-template-columns: repeat(2, 1fr); }
+        .admin-controls-flex { flex-direction: column; align-items: stretch !important; gap: 10px !important; }
+        .date-filter-group { justify-content: space-between !important; width: 100%; }
+        .filter-input { width: 45%; }
+        .card-container { padding: 20px !important; border-radius: 15px !important; width: 95% !important; margin: 10px auto; }
+        h1 { font-size: 18px !important; }
+        .stat-value { font-size: 12px; }
+      }
     </style>
   </head>
   <body>
@@ -176,9 +191,9 @@
                 schoolName: p[0]?.trim(), 
                 districtCode: p[1]?.trim(), 
                 lateTime: p[2]?.trim(),
-                lat: parseFloat(p[3]?.trim()), // Latitude now in Column D
-                lon: parseFloat(p[4]?.trim()), // Longitude now in Column E
-                radius: parseFloat(p[5]?.trim()) || 0.5 // Radius now in Column F
+                lat: parseFloat(p[3]?.trim()),
+                lon: parseFloat(p[4]?.trim()),
+                radius: parseFloat(p[5]?.trim()) || 0.5 
               };
             }));
             setLoading(false);
@@ -214,63 +229,25 @@
             if (combinedCode.length === 8 && !isVerifying) {
               const districtInput = combinedCode.substring(0, 4).toUpperCase().trim();
               const pinInput = combinedCode.substring(4, 8).trim();
-
               const admin = adminList.find(a => a.pin === pinInput && a.districtCode === districtInput);
-              if (admin) {
-                setUser({ ...admin, role: "admin" });
-                setCombinedCode("");
-                return;
-              }
-
+              if (admin) { setUser({ ...admin, role: "admin" }); setCombinedCode(""); return; }
               const staff = staffList.find(s => s.pin === pinInput && s.districtCode === districtInput);
-              if (!staff) {
-                triggerNotify(`Invalid Code: No user found for [${districtInput}]-[${pinInput}].`);
-                setCombinedCode("");
-                return;
-              }
-
-              if (staff.status !== "active") {
-                triggerNotify("Access Denied: Account status inactive.");
-                setCombinedCode("");
-                return;
-              }
-
-              const locInfo = scheduleList.find(s => 
-                s.schoolName.trim() === staff.schoolName.trim() && 
-                s.districtCode.trim() === staff.districtCode.trim()
-              );
-
+              if (!staff) { triggerNotify(`Invalid Code: No user found for [${districtInput}]-[${pinInput}].`); setCombinedCode(""); return; }
+              if (staff.status !== "active") { triggerNotify("Access Denied: Account status inactive."); setCombinedCode(""); return; }
+              const locInfo = scheduleList.find(s => s.schoolName.trim() === staff.schoolName.trim() && s.districtCode.trim() === staff.districtCode.trim());
               if (locInfo && !isNaN(locInfo.lat) && !isNaN(locInfo.lon)) {
                 setIsVerifying(true);
                 navigator.geolocation.getCurrentPosition(
                   (pos) => {
-                    const dist = getDistance(
-                      pos.coords.latitude, 
-                      pos.coords.longitude, 
-                      locInfo.lat, 
-                      locInfo.lon
-                    );
-                    
-                    if (dist <= locInfo.radius) {
-                      setUser(staff);
-                      setCombinedCode("");
-                    } else {
-                      triggerNotify(`Out of Range: ${dist.toFixed(2)}km away. Max allowed: ${locInfo.radius}km.`);
-                      setCombinedCode("");
-                    }
+                    const dist = getDistance(pos.coords.latitude, pos.coords.longitude, locInfo.lat, locInfo.lon);
+                    if (dist <= locInfo.radius) { setUser(staff); setCombinedCode(""); } 
+                    else { triggerNotify(`Out of Range: ${dist.toFixed(2)}km away. Max allowed: ${locInfo.radius}km.`); setCombinedCode(""); }
                     setIsVerifying(false);
                   },
-                  (err) => {
-                    setIsVerifying(false);
-                    triggerNotify("GPS Blocked: Enable location or use direct link.");
-                    setCombinedCode("");
-                  },
+                  (err) => { setIsVerifying(false); triggerNotify("GPS Blocked: Enable location or use direct link."); setCombinedCode(""); },
                   { enableHighAccuracy: true, timeout: 15000 }
                 );
-              } else {
-                setUser(staff);
-                setCombinedCode("");
-              }
+              } else { setUser(staff); setCombinedCode(""); }
             }
           }
           validateLogin();
@@ -280,17 +257,12 @@
           const headers = ["Employee", "Campus", "District", "Type", "Date", "Time", "Late", "Late Time", "Comments"];
           const csvRows = [headers.join(",")];
           data.forEach(log => {
-            csvRows.push([
-              `"${log.employee}"`, `"${log.campus}"`, `"${log.districtCode}"`, log.type, log.dateOnly,
-              log.time.split(',')[1]?.trim() || "", log.isLate ? "YES" : "NO", `"${log.lateMinutes || ''}"`, ""
-            ].join(","));
+            csvRows.push([`"${log.employee}"`, `"${log.campus}"`, `"${log.districtCode}"`, log.type, log.dateOnly, log.time.split(',')[1]?.trim() || "", log.isLate ? "YES" : "NO", `"${log.lateMinutes || ''}"`, ""].join(","));
           });
           const blob = new Blob([csvRows.join("\n")], { type: 'text/csv' });
           const url = window.URL.createObjectURL(blob);
           const a = document.createElement('a');
-          a.href = url;
-          a.download = `${filename}.csv`;
-          a.click();
+          a.href = url; a.download = `${filename}.csv`; a.click();
         };
 
         const calculateStats = (staffLogs) => {
@@ -318,19 +290,11 @@
             const sched = scheduleList.find(s => s.schoolName === user.schoolName && s.districtCode === user.districtCode);
             if (sched && sched.lateTime) {
               const [h, m] = sched.lateTime.split(':');
-              const lateBoundary = new Date();
-              lateBoundary.setHours(parseInt(h), parseInt(m), 0);
-              if (now > lateBoundary) {
-                isLate = true;
-                diffStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-              }
+              const lateBoundary = new Date(); lateBoundary.setHours(parseInt(h), parseInt(m), 0);
+              if (now > lateBoundary) { isLate = true; diffStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); }
             }
           }
-          const entry = { 
-            employee: user.name, districtCode: user.districtCode, type, campus: user.schoolName, 
-            timestamp: firebase.firestore.FieldValue.serverTimestamp(), dateOnly: now.toLocaleDateString(), 
-            isLate, lateMinutes: diffStr 
-          };
+          const entry = { employee: user.name, districtCode: user.districtCode, type, campus: user.schoolName, timestamp: firebase.firestore.FieldValue.serverTimestamp(), dateOnly: now.toLocaleDateString(), isLate, lateMinutes: diffStr };
           try {
             await db.collection("logs").add(entry);
             setLastClockInfo(`Clocked ${type}`);
@@ -342,8 +306,8 @@
           } catch (e) { triggerNotify("Cloud Sync Error!"); }
         };
 
-        const pageStyle = { minHeight: "100vh", display: "flex", justifyContent: "center", alignItems: "center", background: "linear-gradient(135deg, #1e3c72 0%, #2a5298 100%)", color: "#fff", padding: "20px" };
-        const cardStyle = { background: "rgba(255,255,255,0.12)", backdropFilter: "blur(15px)", padding: "30px", borderRadius: 24, width: "100%", maxWidth: user?.role === 'admin' ? "900px" : "360px", boxShadow: "0 20px 45px rgba(0,0,0,0.4)", border: "1px solid rgba(255,255,255,0.1)", position: "relative", overflow: "hidden" };
+        const pageStyle = { minHeight: "100vh", display: "flex", justifyContent: "center", alignItems: "center", background: "linear-gradient(135deg, #1e3c72 0%, #2a5298 100%)", color: "#fff", padding: "10px", boxSizing: "border-box" };
+        const cardStyle = { background: "rgba(255,255,255,0.12)", backdropFilter: "blur(15px)", padding: "30px", borderRadius: 24, width: "100%", maxWidth: user?.role === 'admin' ? "900px" : "360px", boxShadow: "0 20px 45px rgba(0,0,0,0.4)", border: "1px solid rgba(255,255,255,0.1)", position: "relative", overflow: "hidden", boxSizing: "border-box" };
         const inputBase = { width: "100%", padding: "14px", borderRadius: "10px", border: "none", fontSize: "16px", background: "rgba(255,255,255,0.9)", color: "#333", boxSizing: "border-box" };
 
         if (loading) return <div style={pageStyle}><h2>Connecting Cloud...</h2></div>;
@@ -351,7 +315,7 @@
         if (!user) {
           return (
             <div style={pageStyle}>
-              <div style={{...cardStyle, textAlign: "center"}}>
+              <div style={{...cardStyle, textAlign: "center"}} className="card-container">
                 {isVerifying && (
                   <div style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.8)", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", zIndex: 10 }}>
                     <div className="status-dot dot-active loading-pulse" style={{width: 25, height: 25, marginBottom: 15}}></div>
@@ -362,15 +326,7 @@
                 <div style={{ fontSize: "14px", opacity: 0.7, marginBottom: "20px" }}>{currentTime.toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' })}</div>
                 <img src={LOGO_URL} alt="Logo" style={{ maxWidth: "130px", marginBottom: "5px" }} />
                 <div style={{ fontSize: "18px", fontWeight: "600", marginBottom: "25px", letterSpacing: "1px", opacity: 0.9 }}>Attendance Portal</div>
-                <input 
-                  type="password" 
-                  maxLength="8"
-                  disabled={isVerifying}
-                  placeholder={isVerifying ? "Please Wait..." : "8-Digit Access Code"} 
-                  value={combinedCode} 
-                  onChange={e => setCombinedCode(e.target.value)} 
-                  style={{...inputBase, textAlign: "center", opacity: isVerifying ? 0.5 : 1}} 
-                />
+                <input type="password" maxLength="8" disabled={isVerifying} placeholder={isVerifying ? "Please Wait..." : "8-Digit Access Code"} value={combinedCode} onChange={e => setCombinedCode(e.target.value)} style={{...inputBase, textAlign: "center", opacity: isVerifying ? 0.5 : 1}} />
                 <div style={{ fontSize: "10px", marginTop: "10px", opacity: 0.6 }}>Enter District Code + PIN</div>
               </div>
             </div>
@@ -381,7 +337,8 @@
         const lastAction = myTodayLogs.length > 0 ? myTodayLogs[0].type : "OUT";
 
         return (
-          <div style={pageStyle} onClick={() => setTimer(60)}><div style={cardStyle}>
+          <div style={pageStyle} onClick={() => setTimer(60)}>
+            <div style={cardStyle} className="card-container">
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "25px" }}>
                 <div><h1 style={{ margin: "0", fontSize: "22px" }}>{user.name}</h1><p style={{ margin: "0", opacity: 0.7, fontSize: "12px" }}>{user.schoolName}</p></div>
                 <div style={{ textAlign: "right" }}><div style={{ fontSize: "12px", color: "#a5d6a7" }}>{lastClockInfo}</div><div style={{ fontSize: "10px", opacity: 0.5 }}>Reset: {timer}s</div></div>
@@ -396,11 +353,11 @@
                     <div className="stat-box"><div className="stat-label">DISTRICT</div><div className="stat-value">{user.districtCode}</div></div>
                   </div>
                   
-                  <div style={{ display: "flex", gap: "10px", marginBottom: "15px", alignItems: "center" }}>
+                  <div className="admin-controls-flex" style={{ display: "flex", gap: "10px", marginBottom: "15px", alignItems: "center" }}>
                     <input type="text" placeholder="Search staff..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} style={{...inputBase, height: "35px", fontSize: "13px", flex: 2}} />
-                    <div style={{ display: "flex", gap: "5px", flex: 3, justifyContent: "flex-end" }}>
+                    <div className="date-filter-group" style={{ display: "flex", gap: "5px", flex: 3, justifyContent: "flex-end", alignItems: "center" }}>
                         <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="filter-input" />
-                        <span style={{fontSize: "10px", alignSelf: "center"}}>to</span>
+                        <span style={{fontSize: "10px"}}>to</span>
                         <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="filter-input" />
                         {(startDate || endDate) && <button onClick={() => {setStartDate(""); setEndDate("");}} className="reset-btn">✕</button>}
                     </div>
@@ -420,32 +377,25 @@
                                   <td style={{ padding: "12px" }} onClick={() => setExpandedStaff(isExpanded ? null : staff.name)} className="clickable-name">
                                     <span className={`status-dot ${latest?.type === 'IN' ? 'dot-active' : 'dot-inactive'}`}></span>{staff.name}
                                   </td>
-                                  <td style={{ padding: "12px" }}>{latest ? `${latest.type} (${latest.time.split(',')[1]})` : "---"} {latest?.isLate && <span className="late-tag">LATE</span>}</td>
+                                  <td style={{ padding: "12px" }}>{latest ? `${latest.type} (${latest.time.split(',')[1]?.trim()})` : "---"} {latest?.isLate && <span className="late-tag">LATE</span>}</td>
                                   <td style={{ padding: "12px" }}>{new Set(sLogs.map(l => l.dateOnly)).size}</td>
                                 </tr>
                                 {isExpanded && (
                                   <tr className="admin-history-row">
-                                    <td colSpan="3" style={{ padding: "15px 15px 15px 25px", background: "rgba(0,0,0,0.3)" }}>
+                                    <td colSpan="3" style={{ padding: "15px", background: "rgba(0,0,0,0.3)" }}>
                                       <div className="stat-grid">
-                                        <div className="stat-box"><div className="stat-label">Days Present</div><div className="stat-value">{stats.uniqueDays}</div></div>
-                                        <div className="stat-box"><div className="stat-label">Lates (W)</div><div className={`stat-value ${stats.lateWeek > 0 ? 'alert' : ''}`}>{stats.lateWeek}</div></div>
-                                        <div className="stat-box"><div className="stat-label">Lates (M)</div><div className={`stat-value ${stats.lateMonth > 0 ? 'alert' : ''}`}>{stats.lateMonth}</div></div>
-                                        <div className="stat-box"><div className="stat-label">Lates (Y)</div><div className={`stat-value ${stats.lateYear > 0 ? 'alert' : ''}`}>{stats.lateYear}</div></div>
+                                        <div className="stat-box"><div className="stat-label">Days</div><div className="stat-value">{stats.uniqueDays}</div></div>
+                                        <div className="stat-box"><div className="stat-label">Late (W)</div><div className={`stat-value ${stats.lateWeek > 0 ? 'alert' : ''}`}>{stats.lateWeek}</div></div>
+                                        <div className="stat-box"><div className="stat-label">Late (M)</div><div className={`stat-value ${stats.lateMonth > 0 ? 'alert' : ''}`}>{stats.lateMonth}</div></div>
+                                        <div className="stat-box"><div className="stat-label">Late (Y)</div><div className={`stat-value ${stats.lateYear > 0 ? 'alert' : ''}`}>{stats.lateYear}</div></div>
                                       </div>
-                                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "10px" }}>
+                                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "10px", flexWrap: "wrap", gap: "10px" }}>
                                         <div style={{ opacity: 0.7, fontWeight: "bold", fontSize:"12px" }}>Employee Records:</div>
                                         <button className="download-btn" onClick={() => downloadCSV(sLogs, `${staff.name}_History`)}>Download Employee CSV</button>
                                       </div>
                                       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", maxHeight: "200px", overflowY: "auto" }}>
-                                        <div>
-                                            <div style={{fontSize: "10px", marginBottom:"5px", color:"#ff8a65", fontWeight:"bold"}}>LATE HISTORY</div>
-                                            {sLogs.filter(l => l.isLate).length === 0 ? <div style={{opacity:0.5, fontSize:"11px"}}>None</div> : 
-                                             sLogs.filter(l => l.isLate).map(log => <div key={log.id} style={{fontSize:"11px", marginBottom:"2px"}}>{log.dateOnly} @ {log.lateMinutes}</div>)}
-                                        </div>
-                                        <div>
-                                            <div style={{fontSize: "10px", marginBottom:"5px", opacity:0.7, fontWeight:"bold"}}>RECENT ACTIVITY</div>
-                                            {sLogs.slice(0,10).map(log => <div key={log.id} style={{fontSize:"11px", marginBottom:"2px"}}>{log.type}: {log.dateOnly}</div>)}
-                                        </div>
+                                        <div><div style={{fontSize: "10px", marginBottom:"5px", color:"#ff8a65", fontWeight:"bold"}}>LATE HISTORY</div>{sLogs.filter(l => l.isLate).length === 0 ? <div style={{opacity:0.5, fontSize:"11px"}}>None</div> : sLogs.filter(l => l.isLate).map(log => <div key={log.id} style={{fontSize:"11px", marginBottom:"2px"}}>{log.dateOnly} @ {log.lateMinutes}</div>)}</div>
+                                        <div><div style={{fontSize: "10px", marginBottom:"5px", opacity:0.7, fontWeight:"bold"}}>RECENT ACTIVITY</div>{sLogs.slice(0,10).map(log => <div key={log.id} style={{fontSize:"11px", marginBottom:"2px"}}>{log.type}: {log.dateOnly}</div>)}</div>
                                       </div>
                                     </td>
                                   </tr>
@@ -483,7 +433,8 @@
                 </div>
               )}
               <button onClick={handleLogout} style={{ width: "100%", padding: "12px", borderRadius: "10px", border: "1px solid rgba(255,255,255,0.3)", background: "transparent", color: "white", fontWeight: "bold", cursor: "pointer", marginTop: "20px" }}>Log Out</button>
-          </div></div>
+            </div>
+          </div>
         );
       }
       ReactDOM.createRoot(document.getElementById('root')).render(<App />);
