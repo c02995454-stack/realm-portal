@@ -16,7 +16,6 @@
       body, html { margin: 0; padding: 0; height: 100%; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
       #root { height: 100%; }
       
-      /* Internal Notification System to bypass alert() blocks */
       #notification-banner {
         position: fixed; top: -100px; left: 0; right: 0; padding: 15px;
         background: #ff5252; color: white; text-align: center;
@@ -126,7 +125,6 @@
         const [startDate, setStartDate] = useState("");
         const [endDate, setEndDate] = useState("");
 
-        // Helper to trigger UI-based notifications
         const triggerNotify = (text, isError = true) => {
           const banner = document.getElementById('notification-banner');
           banner.innerText = text;
@@ -178,8 +176,9 @@
                 schoolName: p[0]?.trim(), 
                 districtCode: p[1]?.trim(), 
                 lateTime: p[2]?.trim(),
-                plusCode: p[3]?.trim(), 
-                radius: parseFloat(p[4]?.trim()) || 0.5 
+                lat: parseFloat(p[3]?.trim()), // Latitude now in Column D
+                lon: parseFloat(p[4]?.trim()), // Longitude now in Column E
+                radius: parseFloat(p[5]?.trim()) || 0.5 // Radius now in Column F
               };
             }));
             setLoading(false);
@@ -241,32 +240,25 @@
                 s.districtCode.trim() === staff.districtCode.trim()
               );
 
-              if (locInfo && locInfo.plusCode) {
+              if (locInfo && !isNaN(locInfo.lat) && !isNaN(locInfo.lon)) {
                 setIsVerifying(true);
                 navigator.geolocation.getCurrentPosition(
                   (pos) => {
-                    try {
-                      const decoded = OpenLocationCode.decode(locInfo.plusCode);
-                      const dist = getDistance(
-                        pos.coords.latitude, 
-                        pos.coords.longitude, 
-                        decoded.latitudeCenter, 
-                        decoded.longitudeCenter
-                      );
-                      
-                      if (dist <= locInfo.radius) {
-                        setUser(staff);
-                        setCombinedCode("");
-                      } else {
-                        triggerNotify(`Out of Range: ${dist.toFixed(2)}km away. Max allowed: ${locInfo.radius}km.`);
-                        setCombinedCode("");
-                      }
-                    } catch (e) {
-                      triggerNotify("Configuration Error: Invalid Plus Code.");
+                    const dist = getDistance(
+                      pos.coords.latitude, 
+                      pos.coords.longitude, 
+                      locInfo.lat, 
+                      locInfo.lon
+                    );
+                    
+                    if (dist <= locInfo.radius) {
+                      setUser(staff);
                       setCombinedCode("");
-                    } finally {
-                      setIsVerifying(false);
+                    } else {
+                      triggerNotify(`Out of Range: ${dist.toFixed(2)}km away. Max allowed: ${locInfo.radius}km.`);
+                      setCombinedCode("");
                     }
+                    setIsVerifying(false);
                   },
                   (err) => {
                     setIsVerifying(false);
