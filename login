@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Realms App - Cloud Sync & Filtered Export</title>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+
+    <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <script src="https://cdn.jsdelivr.net/npm/open-location-code@1.0.3/js/openlocationcode.min.js"></script>
+
+    <style>
+      body, html { margin: 0; padding: 0; height: 100%; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+      #root { height: 100%; }
+      .scroll-box::-webkit-scrollbar { width: 6px; }
+      .scroll-box::-webkit-scrollbar-track { background: rgba(255,255,255,0.05); }
+      .scroll-box::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 10px; }
+      .status-dot { height: 8px; width: 8px; border-radius: 50%; display: inline-block; margin-right: 8px; }
+      .dot-active { background-color: #4db6ac; box-shadow: 0 0 8px #4db6ac; }
+      .dot-inactive { background-color: #ff8a65; }
+      .late-tag { 
+        font-size: 10px; background: #ff5252; color: white; padding: 2px 6px; 
+        border-radius: 4px; margin-left: 8px; cursor: help; font-weight: bold; display: inline-block;
+      }
+      .history-item {
+        background: rgba(255,255,255,0.05); padding: 8px; border-radius: 6px; margin-bottom: 5px;
+        font-size: 12px; display: flex; justify-content: space-between;
+      }
+      .admin-history-row { background: rgba(0,0,0,0.2); font-size: 11px; }
+      .clickable-name { cursor: pointer; text-decoration: underline; text-decoration-style: dotted; }
+      .clickable-name:hover { color: #4db6ac; }
+      .download-btn {
+        background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2);
+        color: white; padding: 4px 8px; border-radius: 4px; font-size: 10px; cursor: pointer;
+      }
+      .download-btn:hover { background: rgba(255,255,255,0.2); }
+      .filter-input {
+        background: rgba(255,255,255,0.9); border: none; border-radius: 6px; padding: 5px;
+        font-size: 11px; color: #333; width: 110px;
+      }
+      .reset-btn {
+        background: rgba(255,50,50,0.2); border: 1px solid rgba(255,255,255,0.2);
+        color: white; padding: 5px 10px; border-radius: 6px; font-size: 11px; cursor: pointer;
+        display: flex; align-items: center; justify-content: center;
+      }
+      .reset-btn:hover { background: rgba(255,50,50,0.4); }
+
+      .stat-grid {
+        display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 15px;
+      }
+      .stat-box {
+        background: rgba(255,255,255,0.05); padding: 8px; border-radius: 6px; text-align: center;
+      }
+      .stat-label { font-size: 9px; opacity: 0.7; text-transform: uppercase; letter-spacing: 0.5px; }
+      .stat-value { font-size: 14px; font-weight: bold; color: #fff; }
+      .stat-value.alert { color: #ff8a65; }
+
+      @keyframes pulse {
+        0% { transform: scale(0.95); opacity: 0.7; }
+        50% { transform: scale(1.05); opacity: 1; }
+        100% { transform: scale(0.95); opacity: 0.7; }
+      }
+      .loading-pulse { animation: pulse 1.5s infinite ease-in-out; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+      const { useState, useEffect, useMemo } = React;
+
+      const firebaseConfig = {
+        apiKey: "AIzaSyCsYQXulW8xiug_BMlMx4Exmtt7BSTllX8",
+        authDomain: "realms-logs.firebaseapp.com",
+        projectId: "realms-logs",
+        storageBucket: "realms-logs.firebasestorage.app",
+        messagingSenderId: "746390811725",
+        appId: "1:746390811725:web:455ec375d3f9e9f8605804"
+      };
+
+      if (!firebase.apps.length) { firebase.initializeApp(firebaseConfig); }
+      const db = firebase.firestore();
+
+      const STAFF_SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vT-nOcEjfqKJsQVLP91tE0cw-_LXGNO6XcjDYC-CAphU6-fAlAizYkT-ZdFaaHMIzr3t602r11a_J5B/pub?gid=0&single=true&output=csv"; 
+      const ADMIN_SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vT-nOcEjfqKJsQVLP91tE0cw-_LXGNO6XcjDYC-CAphU6-fAlAizYkT-ZdFaaHMIzr3t602r11a_J5B/pub?gid=400750357&single=true&output=csv"; 
+      const SCHEDULE_SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vT-nOcEjfqKJsQVLP91tE0cw-_LXGNO6XcjDYC-CAphU6-fAlAizYkT-ZdFaaHMIzr3t602r11a_J5B/pub?gid=1411884124&single=true&output=csv"; 
+      const LOGO_URL = "https://i.postimg.cc/5YVQFmvK/EFA-Logos-(2)-(1).png"; 
+
+      function getDistance(lat1, lon1, lat2, lon2) {
+        const R = 6371; 
+        const dLat = (lat2 - lat1) * Math.PI / 180;
+        const dLon = (lon2 - lon1) * Math.PI / 180;
+        const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                  Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      }
+
+      function App() {
+        const [combinedCode, setCombinedCode] = useState("");
+        const [isVerifying, setIsVerifying] = useState(false);
+        const [searchTerm, setSearchTerm] = useState("");
+        const [user, setUser] = useState(null);
+        const [logs, setLogs] = useState([]);
+        const [staffList, setStaffList] = useState([]);
+        const [adminList, setAdminList] = useState([]);
+        const [scheduleList, setScheduleList] = useState([]);
+        const [loading, setLoading] = useState(true);
+        const [currentTime, setCurrentTime] = useState(new Date());
+        const [timer, setTimer] = useState(60);
+        const [lastClockInfo, setLastClockInfo] = useState("");
+        const [expandedStaff, setExpandedStaff] = useState(null);
+        const [startDate, setStartDate] = useState("");
+        const [endDate, setEndDate] = useState("");
+
+        useEffect(() => {
+          const clockInterval = setInterval(() => setCurrentTime(new Date()), 1000);
+          return () => clearInterval(clockInterval);
+        }, []);
+
+        useEffect(() => {
+          if (user) {
+            setTimer(60);
+            const countdown = setInterval(() => {
+              setTimer((prev) => {
+                if (prev <= 1) { handleLogout(); return 60; }
+                return prev - 1;
+              });
+            }, 1000);
+            return () => clearInterval(countdown);
+          }
+        }, [user]);
+
+        const handleLogout = () => {
+          setUser(null); setCombinedCode(""); setSearchTerm(""); setLastClockInfo(""); setExpandedStaff(null);
+          setStartDate(""); setEndDate(""); setIsVerifying(false);
+        };
+
+        useEffect(() => {
+          Promise.all([
+            fetch(STAFF_SHEET_URL).then(res => res.text()),
+            fetch(ADMIN_SHEET_URL).then(res => res.text()).catch(() => ""),
+            fetch(SCHEDULE_SHEET_URL).then(res => res.text()).catch(() => "")
+          ]).then(([staffCsv, adminCsv, scheduleCsv]) => {
+            setStaffList(staffCsv.split("\n").slice(1).map(line => {
+              const p = line.split(",");
+              return { pin: p[0]?.trim(), name: p[1]?.trim(), status: p[2]?.trim().toLowerCase(), schoolName: p[3]?.trim(), districtCode: p[4]?.trim() };
+            }));
+            setAdminList(adminCsv.split("\n").slice(1).map(line => {
+              const p = line.split(",");
+              return { pin: p[0]?.trim(), name: p[1]?.trim(), districtCode: p[2]?.trim(), schoolName: p[3]?.trim() };
+            }));
+            setScheduleList(scheduleCsv.split("\n").slice(1).map(line => {
+              const p = line.split(",");
+              return { 
+                schoolName: p[0]?.trim(), 
+                districtCode: p[1]?.trim(), 
+                lateTime: p[2]?.trim(),
+                plusCode: p[3]?.trim(), 
+                radius: parseFloat(p[4]?.trim()) || 0.5 
+              };
+            }));
+            setLoading(false);
+          });
+
+          const unsubscribe = db.collection("logs")
+            .orderBy("timestamp", "desc")
+            .onSnapshot((snapshot) => {
+              setLogs(snapshot.docs.map(doc => ({
+                ...doc.data(),
+                id: doc.id,
+                rawDate: doc.data().timestamp ? doc.data().timestamp.toDate() : null,
+                time: doc.data().timestamp ? doc.data().timestamp.toDate().toLocaleString() : "Syncing..."
+              })));
+            });
+          return () => unsubscribe();
+        }, []);
+
+        const filteredLogs = useMemo(() => {
+          return logs.filter(log => {
+            if (!log.rawDate) return true;
+            const logDate = new Date(log.rawDate).setHours(0,0,0,0);
+            const start = startDate ? new Date(startDate).setHours(0,0,0,0) : null;
+            const end = endDate ? new Date(endDate).setHours(0,0,0,0) : null;
+            if (start && logDate < start) return false;
+            if (end && logDate > end) return false;
+            return true;
+          });
+        }, [logs, startDate, endDate]);
+
+        // --- UPDATED LOGIN LOGIC WITH DEBUGGING ---
+        useEffect(() => {
+          async function validateLogin() {
+            if (combinedCode.length === 8 && !isVerifying) {
+              console.log("8-digit code detected. Validating...");
+              const districtInput = combinedCode.substring(0, 4).toUpperCase().trim();
+              const pinInput = combinedCode.substring(4, 8).trim();
+
+              // 1. Admin Check
+              const admin = adminList.find(a => a.pin === pinInput && a.districtCode === districtInput);
+              if (admin) {
+                console.log("Admin match found.");
+                setUser({ ...admin, role: "admin" });
+                setCombinedCode("");
+                return;
+              }
+
+              // 2. Staff Check
+              const staff = staffList.find(s => s.pin === pinInput && s.districtCode === districtInput);
+              
+              if (!staff) {
+                alert(`Invalid Code: No user found with District [${districtInput}] and PIN [${pinInput}]. Check your spreadsheet.`);
+                setCombinedCode("");
+                return;
+              }
+
+              if (staff.status !== "active") {
+                alert("Access Denied: Your account status is not 'active'.");
+                setCombinedCode("");
+                return;
+              }
+
+              // 3. Location and Schedule Check
+              // Using .trim() here is critical to ensure "Campus A " matches "Campus A"
+              const locInfo = scheduleList.find(s => 
+                s.schoolName.trim() === staff.schoolName.trim() && 
+                s.districtCode.trim() === staff.districtCode.trim()
+              );
+
+              if (locInfo && locInfo.plusCode) {
+                console.log("Location required. Requesting GPS...");
+                setIsVerifying(true);
+
+                if (locInfo.plusCode.length < 10) {
+                  alert("Configuration Error: The Plus Code for this campus is invalid (too short).");
+                  setIsVerifying(false);
+                  setCombinedCode("");
+                  return;
+                }
+
+                navigator.geolocation.getCurrentPosition(
+                  (pos) => {
+                    try {
+                      const decoded = OpenLocationCode.decode(locInfo.plusCode);
+                      const dist = getDistance(
+                        pos.coords.latitude, 
+                        pos.coords.longitude, 
+                        decoded.latitudeCenter, 
+                        decoded.longitudeCenter
+                      );
+                      
+                      console.log(`Current distance: ${dist.toFixed(3)}km. Max allowed: ${locInfo.radius}km`);
+
+                      if (dist <= locInfo.radius) {
+                        setUser(staff);
+                        setCombinedCode("");
+                      } else {
+                        alert(`Out of Range: You are ${dist.toFixed(2)}km away. You must be within ${locInfo.radius}km of ${staff.schoolName}.`);
+                        setCombinedCode("");
+                      }
+                    } catch (e) {
+                      alert("Error: Plus Code decoding failed. Check your schedule spreadsheet.");
+                      setCombinedCode("");
+                    } finally {
+                      setIsVerifying(false);
+                    }
+                  },
+                  (err) => {
+                    setIsVerifying(false);
+                    alert(`GPS Error: ${err.message}. Please enable location services.`);
+                    setCombinedCode("");
+                  },
+                  { enableHighAccuracy: true, timeout: 15000 }
+                );
+              } else {
+                console.log("No location restrictions found for this campus. Bypassing GPS.");
+                setUser(staff);
+                setCombinedCode("");
+              }
+            }
+          }
+          validateLogin();
+        }, [combinedCode, adminList, staffList, scheduleList]);
+
+        const downloadCSV = (data, filename) => {
+          const headers = ["Employee", "Campus", "District", "Type", "Date", "Time", "Late", "Late Time", "Comments"];
+          const csvRows = [headers.join(",")];
+          data.forEach(log => {
+            csvRows.push([
+              `"${log.employee}"`, `"${log.campus}"`, `"${log.districtCode}"`, log.type, log.dateOnly,
+              log.time.split(',')[1]?.trim() || "", log.isLate ? "YES" : "NO", `"${log.lateMinutes || ''}"`, ""
+            ].join(","));
+          });
+          const blob = new Blob([csvRows.join("\n")], { type: 'text/csv' });
+          const url = window.URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `${filename}.csv`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+        };
+
+        const calculateStats = (staffLogs) => {
+          const now = new Date();
+          const currentWeekStart = new Date(now.setDate(now.getDate() - now.getDay()));
+          currentWeekStart.setHours(0,0,0,0);
+          const currentMonthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+          const currentYearStart = new Date(new Date().getFullYear(), 0, 1);
+          let lateWeek = 0; let lateMonth = 0; let lateYear = 0;
+          staffLogs.forEach(log => {
+            if(log.isLate && log.rawDate) {
+              const d = new Date(log.rawDate);
+              if(d >= currentWeekStart) lateWeek++;
+              if(d >= currentMonthStart) lateMonth++;
+              if(d >= currentYearStart) lateYear++;
+            }
+          });
+          return { lateWeek, lateMonth, lateYear, uniqueDays: new Set(staffLogs.map(l => l.dateOnly)).size };
+        };
+
+        const clock = async (type) => {
+          const now = new Date();
+          let isLate = false, diffStr = "";
+          if (type === "IN") {
+            const sched = scheduleList.find(s => s.schoolName === user.schoolName && s.districtCode === user.districtCode);
+            if (sched && sched.lateTime) {
+              const [h, m] = sched.lateTime.split(':');
+              const lateBoundary = new Date();
+              lateBoundary.setHours(parseInt(h), parseInt(m), 0);
+              if (now > lateBoundary) {
+                isLate = true;
+                diffStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+              }
+            }
+          }
+          const entry = { 
+            employee: user.name, districtCode: user.districtCode, type, campus: user.schoolName, 
+            timestamp: firebase.firestore.FieldValue.serverTimestamp(), dateOnly: now.toLocaleDateString(), 
+            isLate, lateMinutes: diffStr 
+          };
+          try {
+            await db.collection("logs").add(entry);
+            setLastClockInfo(`Clocked ${type}`);
+            setTimer(60); 
+            const msg = new SpeechSynthesisUtterance();
+            const firstName = user.name.split(' ')[0];
+            msg.text = type === "IN" ? `Have a great day, ${firstName}!` : `Enjoy your evening, ${firstName}!`;
+            setTimeout(() => { window.speechSynthesis.cancel(); window.speechSynthesis.speak(msg); }, 100);
+          } catch (e) { alert("Sync Error!"); }
+        };
+
+        const pageStyle = { minHeight: "100vh", display: "flex", justifyContent: "center", alignItems: "center", background: "linear-gradient(135deg, #1e3c72 0%, #2a5298 100%)", color: "#fff", padding: "20px" };
+        const cardStyle = { background: "rgba(255,255,255,0.12)", backdropFilter: "blur(15px)", padding: "30px", borderRadius: 24, width: "100%", maxWidth: user?.role === 'admin' ? "900px" : "360px", boxShadow: "0 20px 45px rgba(0,0,0,0.4)", border: "1px solid rgba(255,255,255,0.1)", position: "relative", overflow: "hidden" };
+        const inputBase = { width: "100%", padding: "14px", borderRadius: "10px", border: "none", fontSize: "16px", background: "rgba(255,255,255,0.9)", color: "#333", boxSizing: "border-box" };
+
+        if (loading) return <div style={pageStyle}><h2>Connecting Cloud...</h2></div>;
+
+        if (!user) {
+          return (
+            <div style={pageStyle}>
+              <div style={{...cardStyle, textAlign: "center"}}>
+                {isVerifying && (
+                  <div style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.8)", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", zIndex: 10 }}>
+                    <div className="status-dot dot-active loading-pulse" style={{width: 25, height: 25, marginBottom: 15}}></div>
+                    <div style={{fontSize: "12px", fontWeight: "bold", letterSpacing: "1px"}}>VERIFYING LOCATION...</div>
+                  </div>
+                )}
+                <div style={{ fontSize: "36px", fontWeight: "bold", marginBottom: "5px" }}>{currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+                <div style={{ fontSize: "14px", opacity: 0.7, marginBottom: "20px" }}>{currentTime.toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' })}</div>
+                <img src={LOGO_URL} alt="Logo" style={{ maxWidth: "130px", marginBottom: "5px" }} />
+                <div style={{ fontSize: "18px", fontWeight: "600", marginBottom: "25px", letterSpacing: "1px", opacity: 0.9 }}>Attendance Portal</div>
+                <input 
+                  type="password" 
+                  maxLength="8"
+                  disabled={isVerifying}
+                  placeholder={isVerifying ? "Please Wait..." : "8-Digit Access Code"} 
+                  value={combinedCode} 
+                  onChange={e => setCombinedCode(e.target.value)} 
+                  style={{...inputBase, textAlign: "center", opacity: isVerifying ? 0.5 : 1}} 
+                />
+                <div style={{ fontSize: "10px", marginTop: "10px", opacity: 0.6 }}>Enter District Code + PIN</div>
+              </div>
+            </div>
+          );
+        }
+
+        const myTodayLogs = logs.filter(l => l.employee === user.name && l.dateOnly === new Date().toLocaleDateString());
+        const lastAction = myTodayLogs.length > 0 ? myTodayLogs[0].type : "OUT";
+
+        return (
+          <div style={pageStyle} onClick={() => setTimer(60)}><div style={cardStyle}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "25px" }}>
+                <div><h1 style={{ margin: "0", fontSize: "22px" }}>{user.name}</h1><p style={{ margin: "0", opacity: 0.7, fontSize: "12px" }}>{user.schoolName}</p></div>
+                <div style={{ textAlign: "right" }}><div style={{ fontSize: "12px", color: "#a5d6a7" }}>{lastClockInfo}</div><div style={{ fontSize: "10px", opacity: 0.5 }}>Reset: {timer}s</div></div>
+              </div>
+
+              {user.role === 'admin' ? (
+                <div>
+                  <div className="stat-grid">
+                    <div className="stat-box"><div className="stat-label">TOTAL STAFF</div><div className="stat-value">{staffList.filter(s => s.districtCode === user.districtCode).length}</div></div>
+                    <div className="stat-box"><div className="stat-label">LOGS FOUND</div><div className="stat-value">{filteredLogs.filter(l => l.districtCode === user.districtCode).length}</div></div>
+                    <div className="stat-box"><div className="stat-label">LATE FOUND</div><div className="stat-value alert">{filteredLogs.filter(l => l.districtCode === user.districtCode && l.isLate).length}</div></div>
+                    <div className="stat-box"><div className="stat-label">DISTRICT</div><div className="stat-value">{user.districtCode}</div></div>
+                  </div>
+                  
+                  <div style={{ display: "flex", gap: "10px", marginBottom: "15px", alignItems: "center" }}>
+                    <input type="text" placeholder="Search staff..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} style={{...inputBase, height: "35px", fontSize: "13px", flex: 2}} />
+                    <div style={{ display: "flex", gap: "5px", flex: 3, justifyContent: "flex-end" }}>
+                        <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="filter-input" />
+                        <span style={{fontSize: "10px", alignSelf: "center"}}>to</span>
+                        <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="filter-input" />
+                        {(startDate || endDate) && <button onClick={() => {setStartDate(""); setEndDate("");}} className="reset-btn">✕</button>}
+                    </div>
+                  </div>
+
+                  <div className="scroll-box" style={{ maxHeight: "350px", overflowY: "auto", background: "rgba(0,0,0,0.15)", borderRadius: "12px" }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
+                      <thead style={{ position: "sticky", top: 0, background: "#254885" }}><tr style={{ textAlign: "left" }}><th style={{ padding: "12px" }}>Employee</th><th style={{ padding: "12px" }}>Activity</th><th style={{ padding: "12px" }}>Days</th></tr></thead>
+                      <tbody>{staffList.filter(s => s.districtCode === user.districtCode && s.name.toLowerCase().includes(searchTerm.toLowerCase())).map(staff => {
+                            const sLogs = logs.filter(l => l.employee === staff.name);
+                            const latest = sLogs[0];
+                            const isExpanded = expandedStaff === staff.name;
+                            const stats = isExpanded ? calculateStats(sLogs) : null;
+                            return (
+                              <React.Fragment key={staff.name}>
+                                <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
+                                  <td style={{ padding: "12px" }} onClick={() => setExpandedStaff(isExpanded ? null : staff.name)} className="clickable-name">
+                                    <span className={`status-dot ${latest?.type === 'IN' ? 'dot-active' : 'dot-inactive'}`}></span>{staff.name}
+                                  </td>
+                                  <td style={{ padding: "12px" }}>{latest ? `${latest.type} (${latest.time.split(',')[1]})` : "---"} {latest?.isLate && <span className="late-tag">LATE</span>}</td>
+                                  <td style={{ padding: "12px" }}>{new Set(sLogs.map(l => l.dateOnly)).size}</td>
+                                </tr>
+                                {isExpanded && (
+                                  <tr className="admin-history-row">
+                                    <td colSpan="3" style={{ padding: "15px 15px 15px 25px", background: "rgba(0,0,0,0.3)" }}>
+                                      <div className="stat-grid">
+                                        <div className="stat-box"><div className="stat-label">Days Present</div><div className="stat-value">{stats.uniqueDays}</div></div>
+                                        <div className="stat-box"><div className="stat-label">Lates (W)</div><div className={`stat-value ${stats.lateWeek > 0 ? 'alert' : ''}`}>{stats.lateWeek}</div></div>
+                                        <div className="stat-box"><div className="stat-label">Lates (M)</div><div className={`stat-value ${stats.lateMonth > 0 ? 'alert' : ''}`}>{stats.lateMonth}</div></div>
+                                        <div className="stat-box"><div className="stat-label">Lates (Y)</div><div className={`stat-value ${stats.lateYear > 0 ? 'alert' : ''}`}>{stats.lateYear}</div></div>
+                                      </div>
+                                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "10px" }}>
+                                        <div style={{ opacity: 0.7, fontWeight: "bold", fontSize:"12px" }}>Employee Records:</div>
+                                        <button className="download-btn" onClick={() => downloadCSV(sLogs, `${staff.name}_History`)}>Download Employee CSV</button>
+                                      </div>
+                                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", maxHeight: "200px", overflowY: "auto" }}>
+                                        <div>
+                                            <div style={{fontSize: "10px", marginBottom:"5px", color:"#ff8a65", fontWeight:"bold"}}>LATE HISTORY</div>
+                                            {sLogs.filter(l => l.isLate).length === 0 ? <div style={{opacity:0.5, fontSize:"11px"}}>None</div> : 
+                                             sLogs.filter(l => l.isLate).map(log => <div key={log.id} style={{fontSize:"11px", marginBottom:"2px"}}>{log.dateOnly} @ {log.lateMinutes}</div>)}
+                                        </div>
+                                        <div>
+                                            <div style={{fontSize: "10px", marginBottom:"5px", opacity:0.7, fontWeight:"bold"}}>RECENT ACTIVITY</div>
+                                            {sLogs.slice(0,10).map(log => <div key={log.id} style={{fontSize:"11px", marginBottom:"2px"}}>{log.type}: {log.dateOnly}</div>)}
+                                        </div>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                )}
+                              </React.Fragment>
+                            );
+                          })}</tbody>
+                    </table>
+                  </div>
+                  <button onClick={() => downloadCSV(filteredLogs.filter(l => l.districtCode === user.districtCode), `${user.districtCode}_Filtered_History`)} style={{ width: "100%", padding: "10px", borderRadius: "10px", border: "1px solid #4db6ac", background: "rgba(77, 182, 172, 0.1)", color: "#4db6ac", fontWeight: "bold", cursor: "pointer", marginTop: "15px", fontSize: "12px" }}>
+                    Download District CSV
+                  </button>
+                </div>
+              ) : (
+                <div>
+                  <div style={{ display: "flex", gap: "10px", marginBottom: "25px" }}>
+                    {lastAction === "OUT" ? (
+                        <button onClick={() => clock("IN")} style={{ ...inputBase, background: "#4db6ac", color: "white", fontWeight: "bold", cursor: "pointer" }}>Clock In</button>
+                    ) : (
+                        <button onClick={() => clock("OUT")} style={{ ...inputBase, background: "#ff8a65", color: "white", fontWeight: "bold", cursor: "pointer" }}>Clock Out</button>
+                    )}
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px", borderBottom: "1px solid rgba(255,255,255,0.2)", paddingBottom: "5px" }}>
+                    <span style={{ fontSize: "12px", opacity: 0.8 }}>My Recent Activity</span>
+                    <button className="download-btn" onClick={() => downloadCSV(logs.filter(l => l.employee === user.name), `${user.name}_History`)}>My CSV</button>
+                  </div>
+                  <div className="scroll-box" style={{maxHeight: "150px", overflowY: "auto"}}>
+                    {logs.filter(l => l.employee === user.name).slice(0, 5).map(log => (
+                      <div key={log.id} className="history-item">
+                        <span><strong>{log.type}</strong> at {log.time.split(',')[1]} {log.isLate && <span style={{color:'#ff8a65', fontSize:'10px'}}> (LATE)</span>}</span>
+                        <span style={{opacity: 0.6}}>{log.dateOnly}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <button onClick={handleLogout} style={{ width: "100%", padding: "12px", borderRadius: "10px", border: "1px solid rgba(255,255,255,0.3)", background: "transparent", color: "white", fontWeight: "bold", cursor: "pointer", marginTop: "20px" }}>Log Out</button>
+          </div></div>
+        );
+      }
+      ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+  </body>
+</html>
