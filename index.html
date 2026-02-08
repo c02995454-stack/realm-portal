@@ -158,10 +158,11 @@
 
         useEffect(() => {
           if (user) {
-            setTimer(300); 
+            const initialTime = user.role === 'admin' ? 300 : 60;
+            setTimer(initialTime); 
             const countdown = setInterval(() => {
               setTimer((prev) => {
-                if (prev <= 1) { handleLogout(); return 300; }
+                if (prev <= 1) { handleLogout(); return initialTime; }
                 return prev - 1;
               });
             }, 1000);
@@ -300,7 +301,6 @@
           const todayStr = now.toLocaleDateString();
           const myLogsToday = logs.filter(l => l.employee === user.name && l.dateOnly === todayStr);
           
-          // Rule: Cannot clock back in after clocking out
           if (type === "IN") {
             const hasClockedOut = myLogsToday.some(l => l.type === "OUT");
             if (hasClockedOut) {
@@ -316,7 +316,6 @@
               const [h, m] = sched.lateTime.split(':');
               const lateBoundary = new Date(); lateBoundary.setHours(parseInt(h), parseInt(m), 0);
               if (now > lateBoundary) { 
-                // Rule: Only record 1 late per person per day
                 const alreadyLateToday = myLogsToday.some(l => l.isLate === true);
                 if (!alreadyLateToday) {
                   isLate = true; 
@@ -330,7 +329,7 @@
           try {
             await db.collection("logs").add(entry);
             setLastClockInfo(`Clocked ${type}`);
-            setTimer(300); 
+            setTimer(user.role === 'admin' ? 300 : 60); 
             const msg = new SpeechSynthesisUtterance();
             const firstName = user.name.split(' ')[0];
             msg.text = type === "IN" ? `Have a great day, ${firstName}!` : `Enjoy your evening, ${firstName}!`;
@@ -369,7 +368,7 @@
         const lastAction = myTodayLogs.length > 0 ? myTodayLogs[0].type : "OUT";
 
         return (
-          <div style={pageStyle} onClick={() => setTimer(300)}>
+          <div style={pageStyle} onClick={() => setTimer(user.role === 'admin' ? 300 : 60)}>
             <div style={cardStyle} className="card-container">
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "25px" }}>
                 <div><h1 style={{ margin: "0", fontSize: "22px" }}>{user.name}</h1><p style={{ margin: "0", opacity: 0.7, fontSize: "12px" }}>{user.schoolName}</p></div>
@@ -403,7 +402,6 @@
                             const latest = sLogs[0];
                             const isExpanded = expandedStaff === staff.name;
                             const stats = calculateStats(sLogs);
-                            // Flag if late 3 or more times in the current week
                             const isConsistentlyLate = stats.lateWeek >= 3;
 
                             return (
