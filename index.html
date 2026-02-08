@@ -78,7 +78,6 @@
       }
       .loading-pulse { animation: pulse 1.5s infinite ease-in-out; }
 
-      /* RESPONSIVE ADJUSTMENTS */
       @media (max-width: 600px) {
         .stat-grid { grid-template-columns: repeat(2, 1fr); }
         .admin-controls-flex { flex-direction: column; align-items: stretch !important; gap: 10px !important; }
@@ -134,7 +133,8 @@
         const [scheduleList, setScheduleList] = useState([]);
         const [loading, setLoading] = useState(true);
         const [currentTime, setCurrentTime] = useState(new Date());
-        const [timer, setTimer] = useState(60);
+        // UPDATED: Initial timer set to 300 seconds (5 minutes)
+        const [timer, setTimer] = useState(300);
         const [lastClockInfo, setLastClockInfo] = useState("");
         const [expandedStaff, setExpandedStaff] = useState(null);
         const [startDate, setStartDate] = useState("");
@@ -155,10 +155,10 @@
 
         useEffect(() => {
           if (user) {
-            setTimer(60);
+            setTimer(300); // UPDATED: Reset to 300 on login
             const countdown = setInterval(() => {
               setTimer((prev) => {
-                if (prev <= 1) { handleLogout(); return 60; }
+                if (prev <= 1) { handleLogout(); return 300; }
                 return prev - 1;
               });
             }, 1000);
@@ -169,6 +169,13 @@
         const handleLogout = () => {
           setUser(null); setCombinedCode(""); setSearchTerm(""); setLastClockInfo(""); setExpandedStaff(null);
           setStartDate(""); setEndDate(""); setIsVerifying(false);
+        };
+
+        // NEW: Helper to format seconds into M:SS
+        const formatTimer = (seconds) => {
+          const mins = Math.floor(seconds / 60);
+          const secs = seconds % 60;
+          return `${mins}:${secs.toString().padStart(2, '0')}`;
         };
 
         useEffect(() => {
@@ -298,7 +305,7 @@
           try {
             await db.collection("logs").add(entry);
             setLastClockInfo(`Clocked ${type}`);
-            setTimer(60); 
+            setTimer(300); // UPDATED: Reset to 300 on clock activity
             const msg = new SpeechSynthesisUtterance();
             const firstName = user.name.split(' ')[0];
             msg.text = type === "IN" ? `Have a great day, ${firstName}!` : `Enjoy your evening, ${firstName}!`;
@@ -337,11 +344,12 @@
         const lastAction = myTodayLogs.length > 0 ? myTodayLogs[0].type : "OUT";
 
         return (
-          <div style={pageStyle} onClick={() => setTimer(60)}>
+          <div style={pageStyle} onClick={() => setTimer(300)}>
             <div style={cardStyle} className="card-container">
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "25px" }}>
                 <div><h1 style={{ margin: "0", fontSize: "22px" }}>{user.name}</h1><p style={{ margin: "0", opacity: 0.7, fontSize: "12px" }}>{user.schoolName}</p></div>
-                <div style={{ textAlign: "right" }}><div style={{ fontSize: "12px", color: "#a5d6a7" }}>{lastClockInfo}</div><div style={{ fontSize: "10px", opacity: 0.5 }}>Reset: {timer}s</div></div>
+                {/* UPDATED: Reset timer display to use formatTimer(timer) */}
+                <div style={{ textAlign: "right" }}><div style={{ fontSize: "12px", color: "#a5d6a7" }}>{lastClockInfo}</div><div style={{ fontSize: "10px", opacity: 0.5 }}>Reset: {formatTimer(timer)}</div></div>
               </div>
 
               {user.role === 'admin' ? (
