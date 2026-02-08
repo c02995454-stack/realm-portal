@@ -15,6 +15,16 @@
     <style>
       body, html { margin: 0; padding: 0; height: 100%; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
       #root { height: 100%; }
+      
+      /* Internal Notification System to bypass alert() blocks */
+      #notification-banner {
+        position: fixed; top: -100px; left: 0; right: 0; padding: 15px;
+        background: #ff5252; color: white; text-align: center;
+        font-weight: bold; font-size: 14px; z-index: 10001;
+        transition: transform 0.4s ease; box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+      }
+      #notification-banner.active { transform: translateY(100px); }
+
       .scroll-box::-webkit-scrollbar { width: 6px; }
       .scroll-box::-webkit-scrollbar-track { background: rgba(255,255,255,0.05); }
       .scroll-box::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 10px; }
@@ -67,6 +77,7 @@
     </style>
   </head>
   <body>
+    <div id="notification-banner">Notification</div>
     <div id="root"></div>
 
     <script type="text/babel">
@@ -114,6 +125,15 @@
         const [expandedStaff, setExpandedStaff] = useState(null);
         const [startDate, setStartDate] = useState("");
         const [endDate, setEndDate] = useState("");
+
+        // Helper to trigger UI-based notifications
+        const triggerNotify = (text, isError = true) => {
+          const banner = document.getElementById('notification-banner');
+          banner.innerText = text;
+          banner.style.background = isError ? "#ff5252" : "#4db6ac";
+          banner.classList.add('active');
+          setTimeout(() => banner.classList.remove('active'), 5000);
+        };
 
         useEffect(() => {
           const clockInterval = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -190,56 +210,39 @@
           });
         }, [logs, startDate, endDate]);
 
-        // --- UPDATED LOGIN LOGIC WITH DEBUGGING ---
         useEffect(() => {
           async function validateLogin() {
             if (combinedCode.length === 8 && !isVerifying) {
-              console.log("8-digit code detected. Validating...");
               const districtInput = combinedCode.substring(0, 4).toUpperCase().trim();
               const pinInput = combinedCode.substring(4, 8).trim();
 
-              // 1. Admin Check
               const admin = adminList.find(a => a.pin === pinInput && a.districtCode === districtInput);
               if (admin) {
-                console.log("Admin match found.");
                 setUser({ ...admin, role: "admin" });
                 setCombinedCode("");
                 return;
               }
 
-              // 2. Staff Check
               const staff = staffList.find(s => s.pin === pinInput && s.districtCode === districtInput);
-              
               if (!staff) {
-                alert(`Invalid Code: No user found with District [${districtInput}] and PIN [${pinInput}]. Check your spreadsheet.`);
+                triggerNotify(`Invalid Code: No user found for [${districtInput}]-[${pinInput}].`);
                 setCombinedCode("");
                 return;
               }
 
               if (staff.status !== "active") {
-                alert("Access Denied: Your account status is not 'active'.");
+                triggerNotify("Access Denied: Account status inactive.");
                 setCombinedCode("");
                 return;
               }
 
-              // 3. Location and Schedule Check
-              // Using .trim() here is critical to ensure "Campus A " matches "Campus A"
               const locInfo = scheduleList.find(s => 
                 s.schoolName.trim() === staff.schoolName.trim() && 
                 s.districtCode.trim() === staff.districtCode.trim()
               );
 
               if (locInfo && locInfo.plusCode) {
-                console.log("Location required. Requesting GPS...");
                 setIsVerifying(true);
-
-                if (locInfo.plusCode.length < 10) {
-                  alert("Configuration Error: The Plus Code for this campus is invalid (too short).");
-                  setIsVerifying(false);
-                  setCombinedCode("");
-                  return;
-                }
-
                 navigator.geolocation.getCurrentPosition(
                   (pos) => {
                     try {
@@ -251,17 +254,15 @@
                         decoded.longitudeCenter
                       );
                       
-                      console.log(`Current distance: ${dist.toFixed(3)}km. Max allowed: ${locInfo.radius}km`);
-
                       if (dist <= locInfo.radius) {
                         setUser(staff);
                         setCombinedCode("");
                       } else {
-                        alert(`Out of Range: You are ${dist.toFixed(2)}km away. You must be within ${locInfo.radius}km of ${staff.schoolName}.`);
+                        triggerNotify(`Out of Range: ${dist.toFixed(2)}km away. Max allowed: ${locInfo.radius}km.`);
                         setCombinedCode("");
                       }
                     } catch (e) {
-                      alert("Error: Plus Code decoding failed. Check your schedule spreadsheet.");
+                      triggerNotify("Configuration Error: Invalid Plus Code.");
                       setCombinedCode("");
                     } finally {
                       setIsVerifying(false);
@@ -269,13 +270,12 @@
                   },
                   (err) => {
                     setIsVerifying(false);
-                    alert(`GPS Error: ${err.message}. Please enable location services.`);
+                    triggerNotify("GPS Blocked: Enable location or use direct link.");
                     setCombinedCode("");
                   },
                   { enableHighAccuracy: true, timeout: 15000 }
                 );
               } else {
-                console.log("No location restrictions found for this campus. Bypassing GPS.");
                 setUser(staff);
                 setCombinedCode("");
               }
@@ -298,9 +298,7 @@
           const a = document.createElement('a');
           a.href = url;
           a.download = `${filename}.csv`;
-          document.body.appendChild(a);
           a.click();
-          document.body.removeChild(a);
         };
 
         const calculateStats = (staffLogs) => {
@@ -349,7 +347,7 @@
             const firstName = user.name.split(' ')[0];
             msg.text = type === "IN" ? `Have a great day, ${firstName}!` : `Enjoy your evening, ${firstName}!`;
             setTimeout(() => { window.speechSynthesis.cancel(); window.speechSynthesis.speak(msg); }, 100);
-          } catch (e) { alert("Sync Error!"); }
+          } catch (e) { triggerNotify("Cloud Sync Error!"); }
         };
 
         const pageStyle = { minHeight: "100vh", display: "flex", justifyContent: "center", alignItems: "center", background: "linear-gradient(135deg, #1e3c72 0%, #2a5298 100%)", color: "#fff", padding: "20px" };
