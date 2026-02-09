@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <title>Realms App - Cloud Sync & Filtered Export</title>
+    <title>Realms App - Surgical Strike Security</title>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
 
@@ -112,8 +112,6 @@
       if (!firebase.apps.length) { firebase.initializeApp(firebaseConfig); }
       const db = firebase.firestore();
 
-      const STAFF_SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vT-nOcEjfqKJsQVLP91tE0cw-_LXGNO6XcjDYC-CAphU6-fAlAizYkT-ZdFaaHMIzr3t602r11a_J5B/pub?gid=0&single=true&output=csv"; 
-      const ADMIN_SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vT-nOcEjfqKJsQVLP91tE0cw-_LXGNO6XcjDYC-CAphU6-fAlAizYkT-ZdFaaHMIzr3t602r11a_J5B/pub?gid=400750357&single=true&output=csv"; 
       const SCHEDULE_SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vT-nOcEjfqKJsQVLP91tE0cw-_LXGNO6XcjDYC-CAphU6-fAlAizYkT-ZdFaaHMIzr3t602r11a_J5B/pub?gid=1411884124&single=true&output=csv"; 
       const LOGO_URL = "https://i.postimg.cc/5YVQFmvK/EFA-Logos-(2)-(1).png"; 
 
@@ -133,7 +131,6 @@
         const [user, setUser] = useState(null);
         const [logs, setLogs] = useState([]);
         const [staffList, setStaffList] = useState([]);
-        const [adminList, setAdminList] = useState([]);
         const [scheduleList, setScheduleList] = useState([]);
         const [loading, setLoading] = useState(true);
         const [currentTime, setCurrentTime] = useState(new Date());
@@ -173,6 +170,7 @@
         const handleLogout = () => {
           setUser(null); setCombinedCode(""); setSearchTerm(""); setLastClockInfo(""); setExpandedStaff(null);
           setStartDate(""); setEndDate(""); setIsVerifying(false);
+          setStaffList([]);
         };
 
         const formatTimer = (seconds) => {
@@ -182,19 +180,7 @@
         };
 
         useEffect(() => {
-          Promise.all([
-            fetch(STAFF_SHEET_URL).then(res => res.text()),
-            fetch(ADMIN_SHEET_URL).then(res => res.text()).catch(() => ""),
-            fetch(SCHEDULE_SHEET_URL).then(res => res.text()).catch(() => "")
-          ]).then(([staffCsv, adminCsv, scheduleCsv]) => {
-            setStaffList(staffCsv.split("\n").slice(1).map(line => {
-              const p = line.split(",");
-              return { pin: p[0]?.trim(), name: p[1]?.trim(), status: p[2]?.trim().toLowerCase(), schoolName: p[3]?.trim(), districtCode: p[4]?.trim() };
-            }));
-            setAdminList(adminCsv.split("\n").slice(1).map(line => {
-              const p = line.split(",");
-              return { pin: p[0]?.trim(), name: p[1]?.trim(), districtCode: p[2]?.trim(), schoolName: p[3]?.trim() };
-            }));
+          fetch(SCHEDULE_SHEET_URL).then(res => res.text()).then(scheduleCsv => {
             setScheduleList(scheduleCsv.split("\n").slice(1).map(line => {
               const p = line.split(",");
               return { 
@@ -207,7 +193,7 @@
               };
             }));
             setLoading(false);
-          });
+          }).catch(() => setLoading(false));
 
           const unsubscribe = db.collection("logs")
             .orderBy("timestamp", "desc")
@@ -234,34 +220,78 @@
           });
         }, [logs, startDate, endDate]);
 
+        // Surgical Strike Login Logic
         useEffect(() => {
           async function validateLogin() {
             if (combinedCode.length === 8 && !isVerifying) {
+              setIsVerifying(true);
               const districtInput = combinedCode.substring(0, 4).toUpperCase().trim();
               const pinInput = combinedCode.substring(4, 8).trim();
-              const admin = adminList.find(a => a.pin === pinInput && a.districtCode === districtInput);
-              if (admin) { setUser({ ...admin, role: "admin" }); setCombinedCode(""); return; }
-              const staff = staffList.find(s => s.pin === pinInput && s.districtCode === districtInput);
-              if (!staff) { triggerNotify(`Invalid Code: No user found for [${districtInput}]-[${pinInput}].`); setCombinedCode(""); return; }
-              if (staff.status !== "active") { triggerNotify("Access Denied: Account status inactive."); setCombinedCode(""); return; }
-              const locInfo = scheduleList.find(s => s.schoolName.trim() === staff.schoolName.trim() && s.districtCode.trim() === staff.districtCode.trim());
-              if (locInfo && !isNaN(locInfo.lat) && !isNaN(locInfo.lon)) {
-                setIsVerifying(true);
-                navigator.geolocation.getCurrentPosition(
-                  (pos) => {
-                    const dist = getDistance(pos.coords.latitude, pos.coords.longitude, locInfo.lat, locInfo.lon);
-                    if (dist <= locInfo.radius) { setUser(staff); setCombinedCode(""); } 
-                    else { triggerNotify(`Out of Range: ${dist.toFixed(2)}km away. Max allowed: ${locInfo.radius}km.`); setCombinedCode(""); }
+              const docId = `${districtInput}-${pinInput}`; // Assuming IDs are stored like "TX01-1234"
+
+              try {
+                const doc = await db.collection("users").doc(docId).get();
+                
+                if (doc.exists) {
+                  const userData = doc.data();
+                  if (userData.status !== "active") {
+                    triggerNotify("Access Denied: Account inactive.");
+                    setCombinedCode("");
                     setIsVerifying(false);
-                  },
-                  (err) => { setIsVerifying(false); triggerNotify("GPS Blocked: Enable location or use direct link."); setCombinedCode(""); },
-                  { enableHighAccuracy: true, timeout: 15000 }
-                );
-              } else { setUser(staff); setCombinedCode(""); }
+                    return;
+                  }
+
+                  if (userData.role === "admin") {
+                    setUser(userData);
+                    setCombinedCode("");
+                    setIsVerifying(false);
+                    // Fetch all users for admin view only after successful login
+                    const usersSnap = await db.collection("users").where("districtCode", "==", userData.districtCode).get();
+                    setStaffList(usersSnap.docs.map(d => d.data()));
+                  } else {
+                    // Staff Login - Check Location
+                    const locInfo = scheduleList.find(s => s.schoolName === userData.schoolName);
+                    if (locInfo && !isNaN(locInfo.lat) && !isNaN(locInfo.lon)) {
+                      navigator.geolocation.getCurrentPosition(
+                        (pos) => {
+                          const dist = getDistance(pos.coords.latitude, pos.coords.longitude, locInfo.lat, locInfo.lon);
+                          if (dist <= locInfo.radius) {
+                            setUser(userData);
+                            setCombinedCode("");
+                          } else {
+                            triggerNotify(`Out of Range: ${dist.toFixed(2)}km away.`);
+                            setCombinedCode("");
+                          }
+                          setIsVerifying(false);
+                        },
+                        (err) => {
+                          triggerNotify("GPS Blocked: Location required.");
+                          setCombinedCode("");
+                          setIsVerifying(false);
+                        },
+                        { enableHighAccuracy: true, timeout: 10000 }
+                      );
+                    } else {
+                      // No location data found, allow login (or block depending on policy)
+                      setUser(userData);
+                      setCombinedCode("");
+                      setIsVerifying(false);
+                    }
+                  }
+                } else {
+                  triggerNotify("Invalid Code: User not found.");
+                  setCombinedCode("");
+                  setIsVerifying(false);
+                }
+              } catch (error) {
+                console.error("Login Error", error);
+                triggerNotify("Connection Error.");
+                setIsVerifying(false);
+              }
             }
           }
           validateLogin();
-        }, [combinedCode, adminList, staffList, scheduleList]);
+        }, [combinedCode, scheduleList]);
 
         const downloadCSV = (data, filename) => {
           const headers = ["Employee", "Campus", "District", "Type", "Date", "Time", "Late", "Late Time", "Comments"];
@@ -476,4 +506,3 @@
     </script>
   </body>
 </html>
-
